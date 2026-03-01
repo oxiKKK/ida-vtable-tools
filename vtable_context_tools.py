@@ -697,14 +697,8 @@ class VTablePopupHooks(ida_kernwin.UI_Hooks):
         )
 
 
-class VTableContextToolsPlugin(ida_idaapi.plugin_t):
-    flags = ida_idaapi.PLUGIN_KEEP
-    comment = "Context-menu tools for vtables"
-    help = "Right-click on probable vtable entries"
-    wanted_name = PLUGIN_NAME
-    wanted_hotkey = ""
-
-    def init(self):
+class VTableContextToolsPlugmod(ida_idaapi.plugmod_t):
+    def __init__(self):
         rename_desc = ida_kernwin.action_desc_t(
             ACTION_RENAME,
             "Rename VTable Methods",
@@ -747,12 +741,11 @@ class VTableContextToolsPlugin(ida_idaapi.plugin_t):
         self._hooks.hook()
 
         _log("Plugin initialized")
-        return ida_idaapi.PLUGIN_OK
 
     def run(self, arg):
         _log("Use right-click on disassembly/pseudocode near a vtable entry")
 
-    def term(self):
+    def __del__(self):
         try:
             if hasattr(self, "_hooks") and self._hooks is not None:
                 self._hooks.unhook()
@@ -764,12 +757,22 @@ class VTableContextToolsPlugin(ida_idaapi.plugin_t):
             _log("Plugin terminated")
 
 
+class VTableContextToolsPlugin(ida_idaapi.plugin_t):
+    flags = ida_idaapi.PLUGIN_MULTI
+    comment = "Context-menu tools for vtables"
+    help = "Right-click on probable vtable entries"
+    wanted_name = PLUGIN_NAME
+    wanted_hotkey = ""
+
+    def init(self):
+        return VTableContextToolsPlugmod()
+
+
 def PLUGIN_ENTRY():
     return VTableContextToolsPlugin()
 
 
 if __name__ == "__main__":
     # For testing outside of IDA
-    plugin = VTableContextToolsPlugin()
-    plugin.init()
+    plugin = VTableContextToolsPlugmod()
     plugin.run(0)
