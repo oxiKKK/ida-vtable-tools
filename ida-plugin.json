@@ -1,0 +1,35 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "vtable-context-tools",
+    "version": "1.0.0",
+    "entryPoint": "vtable_context_tools.py",
+    "idaVersions": [
+      "9.0",
+      "9.1",
+      "9.2",
+      "9.3"
+    ],
+    "description": "Adds right-click actions for probable vtable entries so you can rename methods, dump interface skeletons, inspect slot info, and set the 'this' parameter.",
+    "license": "UNLICENSED",
+    "categories": [
+      "api-scripting-and-automation"
+    ],
+    "urls": {
+      "repository": "https://github.com/oxiKKK/ida-vtable-tools"
+    },
+    "authors": [
+      {
+        "name": "oxiKKK",
+        "email": "oxsscze@gmail.com"
+      }
+    ],
+    "keywords": [
+      "vtable",
+      "context-menu",
+      "rename",
+      "dump",
+      "this-pointer"
+    ]
+  }
+}

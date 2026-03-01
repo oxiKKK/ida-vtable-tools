@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import List, Optional, Tuple
 
+import idaapi
 import ida_bytes
 import ida_funcs
 import ida_ida
@@ -14,11 +15,6 @@ import ida_nalt
 import ida_typeinf
 import idc
 
-try:
-    from PySide6 import QtWidgets
-except Exception:
-    QtWidgets = None
-
 PLUGIN_NAME = "VTable Context Tools"
 ACTION_RENAME = "vtable_tools:rename_methods"
 ACTION_DUMP = "vtable_tools:dump_interface"
@@ -28,6 +24,20 @@ MENU_PATH = "VTable Tools/"
 
 MAX_SCAN_SLOTS = 2048
 MIN_VTABLE_SLOTS = 2
+
+
+def _load_qt_widgets():
+    if idaapi.IDA_SDK_VERSION >= 920:
+        from PySide6 import QtWidgets as _QtWidgets
+
+        return _QtWidgets, "PySide6"
+
+    from PyQt5 import QtWidgets as _QtWidgets
+
+    return _QtWidgets, "PyQt5"
+
+
+QtWidgets, QT_BINDING = _load_qt_widgets()
 
 
 @dataclass
@@ -238,7 +248,7 @@ def _has_user_renamed_name(func_ea: int, current_name: str) -> bool:
 
 def _ask_rename_options(default_class: str) -> Optional[Tuple[str, bool]]:
     if QtWidgets is None:
-        ida_kernwin.warning("PySide6 is required for this dialog.")
+        ida_kernwin.warning(f"{QT_BINDING} is required for this dialog.")
         return None
 
     dialog = QtWidgets.QDialog()
@@ -277,7 +287,7 @@ def _ask_rename_options(default_class: str) -> Optional[Tuple[str, bool]]:
 
 def _confirm_action(title: str, message: str) -> bool:
     if QtWidgets is None:
-        ida_kernwin.warning("PySide6 is required for this confirmation dialog.")
+        ida_kernwin.warning(f"{QT_BINDING} is required for this confirmation dialog.")
         return False
 
     result = QtWidgets.QMessageBox.question(
