@@ -2,7 +2,7 @@
   "IDAMetadataDescriptorVersion": 1,
   "plugin": {
     "name": "vtable-context-tools",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "entryPoint": "vtable_context_tools.py",
     "idaVersions": [
       "9.0",
