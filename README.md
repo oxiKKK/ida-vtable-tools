@@ -40,6 +40,8 @@ Mode B renames each unique target function by appending the slot index and relat
 CEngineClient__sub_18007C450_61_1E8
 ```
 
+![](assets/annotation.png)
+
 ### Rename vtable target methods with a class prefix.
 
 ![](assets/rename.png)
@@ -51,4 +53,3 @@ CEngineClient__sub_18007C450_61_1E8
 ### Show current slot index and relative offset for the selected vtable entry.
 
 ![](assets/slot.png)
-
