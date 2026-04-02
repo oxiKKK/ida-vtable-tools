@@ -24,6 +24,22 @@ public:
 ...
 ```
 
+### Annotate vtable slots or rename target methods with slot metadata.
+
+The context menu action supports two modes:
+
+Mode A adds a regular comment to each vtable slot so you can see lines like:
+
+```cpp
+dq offset CEngineClient__sub_18007C450 ; 61 0x1E8
+```
+
+Mode B renames each unique target function by appending the slot index and relative offset, for example:
+
+```cpp
+CEngineClient__sub_18007C450_61_1E8
+```
+
 ### Rename vtable target methods with a class prefix.
 
 ![](assets/rename.png)

@@ -24,10 +24,13 @@ ACTION_RENAME = "vtable_tools:rename_methods"
 ACTION_DUMP = "vtable_tools:dump_interface"
 ACTION_SET_THIS = "vtable_tools:set_this_param"
 ACTION_SLOT_INFO = "vtable_tools:slot_info"
+ACTION_ANNOTATE = "vtable_tools:annotate_methods"
 MENU_PATH = "VTable Tools/"
 
 MAX_SCAN_SLOTS = 2048
 MIN_VTABLE_SLOTS = 2
+ANNOTATION_MODE_SLOT_COMMENT = "slot_comment"
+ANNOTATION_MODE_RENAME_METHOD = "rename_method"
 
 
 @dataclass
@@ -358,6 +361,163 @@ def _build_interface_text(entries: List[VTableEntry], class_name: str) -> str:
     return "\n".join(lines)
 
 
+def _ask_annotation_mode() -> Optional[str]:
+    if QtWidgets is None:
+        ida_kernwin.warning("PySide6 is required for this dialog.")
+        return None
+
+    dialog = QtWidgets.QDialog()
+    dialog.setWindowTitle("VTable Annotation Mode")
+
+    layout = QtWidgets.QVBoxLayout(dialog)
+    mode_group = QtWidgets.QGroupBox("Select action")
+    mode_layout = QtWidgets.QVBoxLayout(mode_group)
+
+    slot_comment_radio = QtWidgets.QRadioButton(
+        "Add a comment to each vtable slot"
+    )
+    rename_method_radio = QtWidgets.QRadioButton(
+        "Rename each target method with slot suffix"
+    )
+    slot_comment_radio.setChecked(True)
+
+    mode_layout.addWidget(slot_comment_radio)
+    mode_layout.addWidget(rename_method_radio)
+    layout.addWidget(mode_group)
+
+    note_label = QtWidgets.QLabel(
+        "Comment mode writes slot text on the vtable line, for example '; 61 0x1E8'. Rename mode appends the slot index and offset to the target function name."
+    )
+    note_label.setWordWrap(True)
+    layout.addWidget(note_label)
+
+    example_label = QtWidgets.QLabel("Example in IDA disassembly:")
+    layout.addWidget(example_label)
+
+    example_preview = QtWidgets.QPlainTextEdit()
+    example_preview.setReadOnly(True)
+    example_preview.setPlainText(
+"""\
+With the comment:
+sub_18007CA60 ; 104 0x340
+
+With the method rename:
+sub_18007CA60_104_340
+"""
+    )
+    preview_height = (
+        example_preview.blockCount() * example_preview.fontMetrics().lineSpacing()
+        + int(example_preview.document().documentMargin()) * 2
+        + example_preview.frameWidth() * 2
+        + 8
+    )
+    example_preview.setMinimumHeight(preview_height)
+    example_preview.setMaximumHeight(preview_height)
+    layout.addWidget(example_preview)
+
+    buttons = QtWidgets.QDialogButtonBox(
+        QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+    )
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        return None
+
+    if rename_method_radio.isChecked():
+        return ANNOTATION_MODE_RENAME_METHOD
+    return ANNOTATION_MODE_SLOT_COMMENT
+
+
+def _build_slot_annotation(entry: VTableEntry, slot_index: int, vtable_start: int) -> str:
+    rel_off = entry.slot_ea - vtable_start
+    return f"{slot_index} 0x{rel_off:X}"
+
+
+def _strip_slot_suffix(name: str) -> str:
+    return re.sub(r"_\d+_[0-9A-F]+$", "", name)
+
+
+def _build_annotated_method_name(
+    entry: VTableEntry, slot_index: int, vtable_start: int
+) -> str:
+    rel_off = entry.slot_ea - vtable_start
+    base_name = _strip_slot_suffix(entry.func_name)
+    return f"{base_name}_{slot_index}_{rel_off:X}"
+
+
+def _annotate_vtable_slots(entries: List[VTableEntry]) -> tuple[int, int, int]:
+    if not entries:
+        return 0, 0, 0
+
+    vtable_start = entries[0].slot_ea
+    updated = 0
+    failed = 0
+    unchanged = 0
+
+    for slot_index, entry in enumerate(entries):
+        comment = _build_slot_annotation(entry, slot_index, vtable_start)
+        current_comment = idc.get_cmt(entry.slot_ea, 0) or ""
+        if current_comment == comment:
+            unchanged += 1
+            continue
+
+        if idc.set_cmt(entry.slot_ea, comment, 0):
+            updated += 1
+        else:
+            failed += 1
+            _log(
+                f"Failed to update slot comment for 0x{entry.slot_ea:X} -> 0x{entry.func_ea:X}"
+            )
+
+    return updated, failed, unchanged
+
+
+def _rename_vtable_methods_with_slot_suffix(
+    entries: List[VTableEntry],
+) -> tuple[int, int, int]:
+    if not entries:
+        return 0, 0, 0
+
+    vtable_start = entries[0].slot_ea
+    updated = 0
+    failed = 0
+    unchanged = 0
+    seen: set[int] = set()
+
+    for slot_index, entry in enumerate(entries):
+        if entry.func_ea in seen:
+            unchanged += 1
+            continue
+        seen.add(entry.func_ea)
+
+        current_name = ida_name.get_name(entry.func_ea) or entry.func_name
+        desired_name = _build_annotated_method_name(entry, slot_index, vtable_start)
+
+        if current_name == desired_name:
+            unchanged += 1
+            continue
+
+        ok = ida_name.set_name(entry.func_ea, desired_name, ida_name.SN_CHECK)
+        if not ok:
+            ok = ida_name.set_name(
+                entry.func_ea,
+                desired_name,
+                ida_name.SN_FORCE | ida_name.SN_CHECK,
+            )
+
+        if ok:
+            updated += 1
+        else:
+            failed += 1
+            _log(
+                f"Failed to rename 0x{entry.func_ea:X} '{current_name}' -> '{desired_name}'"
+            )
+
+    return updated, failed, unchanged
+
+
 def _select_this_type(default_type: str) -> Optional[str]:
     chooser = getattr(ida_kernwin, "choose_struc", None)
     if chooser is not None:
@@ -593,6 +753,61 @@ class DumpVTableInterfaceAction(_BaseVTableAction):
         return 1
 
 
+class AnnotateVTableMethodsAction(_BaseVTableAction):
+    def activate(self, ctx):
+        entries = self._get_entries_or_warn(ctx)
+        if not entries:
+            return 1
+
+        mode = _ask_annotation_mode()
+        if mode is None:
+            return 1
+
+        slot_count = len(entries)
+        unique_funcs = len({entry.func_ea for entry in entries})
+        if mode == ANNOTATION_MODE_SLOT_COMMENT:
+            mode_text = "Add a comment to each vtable slot"
+            target_text = f"Targets: {slot_count} slot(s)"
+        else:
+            mode_text = "Rename each target method with slot suffix"
+            target_text = f"Targets: {unique_funcs} unique function(s)"
+
+        if not _confirm_action(
+            "Confirm VTable Annotation",
+            "Apply the selected vtable annotation mode?\n\n"
+            f"Mode: {mode_text}\n"
+            f"{target_text}",
+        ):
+            return 1
+
+        if mode == ANNOTATION_MODE_SLOT_COMMENT:
+            updated, failed, unchanged = _annotate_vtable_slots(entries)
+            _log(
+                "Annotated vtable slots: "
+                f"{updated} updated, {failed} failed, {unchanged} unchanged"
+            )
+            _show_info(
+                "Slot Annotation Complete",
+                f"Updated {updated} slot comment(s)."
+                + (f"\nFailed: {failed}" if failed else "")
+                + (f"\nUnchanged: {unchanged}" if unchanged else ""),
+            )
+            return 1
+
+        updated, failed, unchanged = _rename_vtable_methods_with_slot_suffix(entries)
+        _log(
+            "Renamed vtable target methods with slot suffix: "
+            f"{updated} updated, {failed} failed, {unchanged} unchanged"
+        )
+        _show_info(
+            "Method Rename Complete",
+            f"Renamed {updated} function(s)."
+            + (f"\nFailed: {failed}" if failed else "")
+            + (f"\nUnchanged: {unchanged}" if unchanged else ""),
+        )
+        return 1
+
+
 class SetThisParamTypeAction(_BaseVTableAction):
     def activate(self, ctx):
         entries = self._get_entries_or_warn(ctx)
@@ -685,6 +900,9 @@ class VTablePopupHooks(ida_kernwin.UI_Hooks):
         ida_kernwin.attach_action_to_popup(
             widget, popup_handle, ACTION_SLOT_INFO, MENU_PATH
         )
+        ida_kernwin.attach_action_to_popup(
+            widget, popup_handle, ACTION_ANNOTATE, MENU_PATH
+        )
 
 
 class VTableContextToolsPlugin(ida_idaapi.plugin_t):
@@ -711,6 +929,14 @@ class VTableContextToolsPlugin(ida_idaapi.plugin_t):
             "Dump a C++ interface skeleton for this vtable",
             -1,
         )
+        annotate_desc = ida_kernwin.action_desc_t(
+            ACTION_ANNOTATE,
+            "Annotate Slots / Rename Methods",
+            AnnotateVTableMethodsAction(),
+            "",
+            "Add slot comments or rename target methods with slot suffixes",
+            -1,
+        )
         set_this_desc = ida_kernwin.action_desc_t(
             ACTION_SET_THIS,
             "Set First Parameter as 'this'",
@@ -730,6 +956,7 @@ class VTableContextToolsPlugin(ida_idaapi.plugin_t):
 
         ida_kernwin.register_action(rename_desc)
         ida_kernwin.register_action(dump_desc)
+        ida_kernwin.register_action(annotate_desc)
         ida_kernwin.register_action(set_this_desc)
         ida_kernwin.register_action(slot_info_desc)
 
@@ -749,6 +976,7 @@ class VTableContextToolsPlugin(ida_idaapi.plugin_t):
         finally:
             ida_kernwin.unregister_action(ACTION_RENAME)
             ida_kernwin.unregister_action(ACTION_DUMP)
+            ida_kernwin.unregister_action(ACTION_ANNOTATE)
             ida_kernwin.unregister_action(ACTION_SET_THIS)
             ida_kernwin.unregister_action(ACTION_SLOT_INFO)
             _log("Plugin terminated")
